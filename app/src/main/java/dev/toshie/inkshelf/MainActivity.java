@@ -80,7 +80,28 @@ public class MainActivity extends Activity {
         });
 
         wv.addJavascriptInterface(new Bridge(), "AndroidBridge");
-        wv.loadUrl("https://appassets.androidx.dev/assets/inkshelf.html");
+
+        // Load the bundled HTML directly (bulletproof), keeping the same secure
+        // https origin so IndexedDB is persistent. Asset-loader interception above
+        // remains as a fallback and for any /assets/ subresources.
+        String html = null;
+        try {
+            java.io.InputStream is = getAssets().open("inkshelf.html");
+            java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[16384];
+            int n;
+            while ((n = is.read(buf)) > 0) bo.write(buf, 0, n);
+            is.close();
+            html = bo.toString("UTF-8");
+        } catch (Exception e) {
+            Toast.makeText(this, "Asset read failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
+        if (html != null) {
+            wv.loadDataWithBaseURL("https://appassets.androidx.dev/assets/inkshelf.html",
+                    html, "text/html", "utf-8", null);
+        } else {
+            wv.loadUrl("https://appassets.androidx.dev/assets/inkshelf.html");
+        }
     }
 
     @Override
