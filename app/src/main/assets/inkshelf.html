@@ -128,11 +128,26 @@ hr.sep{border:0;border-top:1px solid var(--line);margin:12px 0;}
 #page{position:relative;background:var(--paper);box-shadow:0 14px 44px rgba(0,0,0,.6);border-radius:3px;overflow:hidden;}
 #pageBgImg{position:absolute;inset:0;background-size:cover;background-position:center;pointer-events:none;}
 #pagePaper{position:absolute;inset:0;pointer-events:none;}
+#pageText{position:absolute;top:32px;left:36px;right:30px;bottom:24px;outline:none;overflow:hidden;
+  line-height:32px;font-size:19px;color:#1d232e;word-wrap:break-word;overflow-wrap:break-word;white-space:pre-wrap;caret-color:#1650d8;}
+#pageText:empty::before{content:attr(data-ph);color:#a8b0bf;font-style:italic;}
+#canvasWrap.drawing #pageText{pointer-events:none;}
+#elLayer{pointer-events:none;} .pel{pointer-events:auto;}
+.pel.sel{touch-action:none;}
+.el-note .body{padding:12px 14px 18px;overflow:auto;border-radius:2px;color:#3a3320;line-height:1.45;
+  word-wrap:break-word;overflow-wrap:break-word;white-space:pre-wrap;
+  box-shadow:0 8px 18px rgba(70,55,10,.28);
+  background-image:linear-gradient(160deg,rgba(255,255,255,.5),rgba(255,255,255,0) 45%),
+    linear-gradient(315deg,rgba(0,0,0,.16) 11px,rgba(0,0,0,.05) 12px,transparent 12.5px);}
 #elLayer{position:absolute;inset:0;}
 #inkLayer{position:absolute;inset:0;}
 #inkLayer.active{cursor:crosshair;pointer-events:all;touch-action:none;}
+#inkLayer{z-index:60;}
+.pel.sel{z-index:500!important;}
+#inkLayer .catch{pointer-events:none;}
+#inkLayer.active .catch{pointer-events:all;}
 #canvasWrap{touch-action:pan-x pan-y;}
-#canvasWrap.drawing #elLayer{pointer-events:none;}
+#canvasWrap.drawing #elLayer,#canvasWrap.drawing #elLayer .pel{pointer-events:none!important;}
 #inkLayer:not(.active){pointer-events:none;}
 
 /* ---------- page elements ---------- */
@@ -278,6 +293,7 @@ hr.sep{border:0;border-top:1px solid var(--line);margin:12px 0;}
       <span class="tbar-sep"></span>
       <button class="tool" data-add="text" title="Text box">🅰</button>
       <button class="tool" data-add="log" title="Log entry (chat widget)">💬</button>
+      <button class="tool" data-add="note" title="Sticky note">🗒️</button>
       <button class="tool" data-add="image" title="Image">🖼</button>
       <button class="tool" data-add="sticker" title="Sticker">🏷️</button>
       <button class="tool" data-add="plink" title="Page link">🔗</button>
@@ -302,6 +318,7 @@ hr.sep{border:0;border-top:1px solid var(--line);margin:12px 0;}
           <div id="page">
             <div id="pageBgImg"></div>
             <div id="pagePaper"></div>
+            <div id="pageText" spellcheck="false" data-ph="Tap here and start typing…"></div>
             <div id="elLayer"></div>
             <svg id="inkLayer" xmlns="http://www.w3.org/2000/svg"></svg>
           </div>
@@ -328,7 +345,7 @@ const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 function toast(m){const t=$('#toast');t.textContent=m;t.style.display='block';clearTimeout(t._h);t._h=setTimeout(()=>t.style.display='none',2600);}
 function el(tag,attrs={},...kids){const e=document.createElement(tag);for(const[k,v]of Object.entries(attrs)){
   if(k==='cls')e.className=v;else if(k==='html')e.innerHTML=v;else if(k==='text')e.textContent=v;
-  else if(k.startsWith('on'))e.addEventListener(k.slice(2),v);else if(k==='style')e.style.cssText=v;else e.setAttribute(k,v);}
+  else if(k.startsWith('on'))e.addEventListener(k.slice(2),v);else if(k==='style')e.style.cssText=v;else if(k==='value')e.value=v;else if(k==='checked')e.checked=!!v;else e.setAttribute(k,v);}
   for(const k of kids){if(k==null)continue;e.append(k.nodeType?k:document.createTextNode(k));}return e;}
 
 /* ---------------- Cache DB (IndexedDB, memory fallback) ---------------- */
@@ -420,6 +437,7 @@ const SYSTEM_FONTS=['system-ui','Roboto','Noto Sans','Noto Serif','Arial','Helve
  'Comic Sans MS','Impact','Brush Script MT','cursive','fantasy','serif','sans-serif'];
 let customFonts=[]; // {family, assetId}
 async function loadCustomFonts(){ const m=await DB.get('meta','fonts'); customFonts=(m&&m.list)||[];
+  try{const nt=await DB.get('meta','noteTpls'); S.noteTpls=(nt&&nt.list)||[];}catch(_){S.noteTpls=[];}
   for(const f of customFonts){ try{const u=await AssetCache.url(f.assetId);
     const ff=new FontFace(f.family,`url(${u})`); await ff.load(); document.fonts.add(ff);}catch(e){} } }
 async function addFontFile(file){ const family=file.name.replace(/\.[^.]+$/,'').replace(/[^A-Za-z0-9 _-]/g,'');
@@ -431,11 +449,11 @@ function fontOptions(sel){ return [...SYSTEM_FONTS,...customFonts.map(f=>f.famil
   .map(f=>`<option value='${esc(f)}' ${f===sel?'selected':''}>${esc(f.replace(/"/g,''))}</option>`).join('')+`<option value="__custom__">＋ Load font file…</option>`;}
 
 /* ---------------- global state ---------------- */
-const S={notebooks:[],nb:null,pages:[],pageIdx:0,zoom:1,tool:'select',selEl:null,
+const S={notebooks:[],nb:null,pages:[],pageIdx:0,zoom:1,tool:'select',selEl:null,noteTpls:[],
  pen:{color:'#1d3557',size:3,opacity:1}, pencil:{color:'#4a4a55',size:2.5,opacity:.7}, marker:{color:'#ffe066',size:18,opacity:.42},
  profiles:[],curProfile:null,stickers:[]};
 const PAGE_SIZES={A4:[900,1273],Letter:[900,1165],Square:[1000,1000],Screen:[900,1600],Wide:[1400,900]};
-const PAPERS={blank:'',lined:'repeating-linear-gradient(transparent,transparent 31px,#bcd0e5 31px,#bcd0e5 32px)',
+const PAPERS={blank:'',lined:'repeating-linear-gradient(transparent,transparent 31px,#a9c2dc 31px,#a9c2dc 32px)',
  grid:'repeating-linear-gradient(transparent,transparent 31px,#c9d6e8 31px,#c9d6e8 32px),repeating-linear-gradient(90deg,transparent,transparent 31px,#c9d6e8 31px,#c9d6e8 32px)',
  dots:'radial-gradient(#b9c6da 1.3px,transparent 1.6px)'};
 const COVERS=['linear-gradient(160deg,#7b2d43,#3d0f1f)','linear-gradient(160deg,#1f4f46,#0c221e)','linear-gradient(160deg,#2b4a7f,#101f3c)',
@@ -639,6 +657,12 @@ async function renderPage(){
   redrawStrokes();
   const lay=$('#elLayer'); lay.innerHTML=''; S.selEl=null;
   for(const e of p.els) lay.append(await buildEl(e));
+  const pt=$('#pageText'); pt.style.fontFamily=(p.font||S.nb.font)||'';
+  pt.innerHTML=p.body||'';
+  pt.contentEditable=(S.tool==='select')?'true':'false';
+  pt.oninput=()=>{p.body=pt.innerHTML;queueSave();};
+  pt.onfocus=pageTextFormatBar;
+  pt.onblur=()=>setTimeout(()=>{if(document.activeElement!==pt)renderSubtool();},150);
   markThumbActive();
 }
 function pathD(pts){if(pts.length<2)return `M ${pts[0][0]} ${pts[0][1]} l 0.1 0`;
@@ -654,7 +678,7 @@ function strokeNode(s){const ns='http://www.w3.org/2000/svg';const g=document.cr
   if(s.tool==='pencil'){g.setAttribute('stroke-dasharray','0.1 '+(s.size*0.9));g.setAttribute('stroke-linecap','round');}
   g.dataset.sid=s.id; return g;}
 function redrawStrokes(){const ink=$('#inkLayer');const p=curPage();
-  ink.innerHTML=`<rect x="0" y="0" width="${p.w}" height="${p.h}" fill="none" pointer-events="all"/>`;
+  ink.innerHTML=`<rect x="0" y="0" width="${p.w}" height="${p.h}" fill="none" class="catch"/>`;
   for(const s of p.strokes)ink.append(strokeNode(s));}
 
 /* ---------- drawing engine ---------- */
@@ -695,6 +719,7 @@ function setTool(t){S.tool=t;
   ink.classList.toggle('active',drawTool);
   $('#canvasWrap').classList.toggle('drawing',drawTool);
   if(!drawTool)deselectEl(false);
+  const pt=$('#pageText'); if(pt){pt.contentEditable=(t==='select')?'true':'false'; if(t!=='select')pt.blur();}
   renderSubtool();
   $('#dotPen').style.background=S.pen.color; $('#dotPencil').style.background=S.pencil.color; $('#dotMarker').style.background=S.marker.color;
 }
@@ -703,6 +728,20 @@ $$('#toolbar .tool[data-add]').forEach(b=>b.onclick=()=>addElement(b.dataset.add
 const PEN_SW={pen:['#1d3557','#111111','#c1121f','#1b7a3d','#2455c3','#7b2cbf','#e07b00','#ff6ec7','#ffffff'],
   pencil:['#4a4a55','#111','#6b4f3a','#274690','#7b2d43'],
   marker:['#ffe066','#8cff9e','#8fd0ff','#ffb3c8','#e6b3ff','#ffd0a1']};
+function pageTextFormatBar(){const st=$('#subtool');st.innerHTML='';
+  const mk=(label,fn,ttl)=>{const b=el('button',{cls:'btn small',html:label,title:ttl||''});
+    b.addEventListener('pointerdown',e=>e.preventDefault());
+    b.onclick=e=>{e.preventDefault();fn();$('#pageText').focus();};return b;};
+  st.append(mk('<b>B</b>',()=>document.execCommand('bold'),'Bold'),
+    mk('<i>I</i>',()=>document.execCommand('italic'),'Italic'),
+    mk('<u>U</u>',()=>document.execCommand('underline'),'Underline'),
+    mk('<s>S</s>',()=>document.execCommand('strikeThrough'),'Strikethrough'),
+    mk('🖍',()=>document.execCommand('hiliteColor',false,'#fff36b'),'Highlight'),
+    mk('⌫',()=>document.execCommand('removeFormat'),'Clear formatting'));
+  for(const c of ['#1d232e','#e02020','#1650d8','#178a3a','#b026ff'])
+    st.append(mk(`<span style="display:inline-block;width:15px;height:15px;border-radius:50%;background:${c};vertical-align:-2px"></span>`,
+      ()=>document.execCommand('foreColor',false,c),'Text color'));
+}
 function renderSubtool(){
   const st=$('#subtool'); st.innerHTML='';
   if(['pen','pencil','marker'].includes(S.tool)){
@@ -714,7 +753,7 @@ function renderSubtool(){
     const op=el('input',{type:'range',min:.08,max:1,step:.02,value:cfg.opacity,oninput:e=>cfg.opacity=+e.target.value});
     st.append(sws,cust,el('span',{text:'size'}),size,el('span',{text:'opacity'}),op);
   }else if(S.tool==='eraser'){st.append(el('span',{text:'Stroke eraser — tap or drag across a stroke to remove it. ↩ undoes the last stroke.'}));}
-  else{st.append(el('span',{text:'Select: tap an element to move, resize (corner dot) or edit (toolbar above it). Long-press-drag to move.'}));}
+  else{st.append(el('span',{text:'Type right on the page ✍ — or tap an element to select it, then drag to move; － ＋ scale, corner dot resizes.'}));}
 }
 
 /* ---------- zoom ---------- */
@@ -840,7 +879,7 @@ function pageSettingsModal(){
 <script>
 /* ================= PAGE ELEMENTS ================= */
 function deselectEl(persist=true){if(S.selEl){S.selEl.classList.remove('sel');S.selEl=null;}}
-$('#elLayer').addEventListener('pointerdown',e=>{if(e.target===$('#elLayer'))deselectEl();});
+$('#page').addEventListener('pointerdown',e=>{if(!e.target.closest('.pel'))deselectEl();});
 $('#canvasWrap').addEventListener('pointerdown',e=>{if(e.target===$('#canvasWrap')||e.target===$('#pageScaler'))deselectEl();});
 
 async function buildEl(d){
@@ -878,14 +917,17 @@ async function buildEl(d){
   n.addEventListener('pointerdown',ev=>{
     if(S.tool!=='select')return;
     if(ev.target.closest('.elbar')||ev.target.classList.contains('rsz'))return;
-    deselectEl(); S.selEl=n; n.classList.add('sel');
-    // allow interacting with scrollable/clickable content unless dragging from edge: drag anywhere but require small delay-free move
+    const wasSel=n.classList.contains('sel');
+    if(!wasSel){deselectEl(); S.selEl=n; n.classList.add('sel'); return;} // first tap = select; page still scrolls naturally
+    // already selected → drag moves it immediately
+    ev.preventDefault(); n.setPointerCapture(ev.pointerId); n.classList.add('dragging');
     const sx=ev.clientX,sy=ev.clientY,ox=d.x,oy=d.y; let moved=false;
-    const mv=e2=>{const dx=(e2.clientX-sx)/S.zoom,dy=(e2.clientY-sy)/S.zoom;
-      if(!moved&&Math.hypot(dx*S.zoom,dy*S.zoom)>6){moved=true;n.classList.add('dragging');n.setPointerCapture(ev.pointerId);e2.preventDefault();}
-      if(moved){d.x=ox+dx;d.y=oy+dy;n.style.left=d.x+'px';n.style.top=d.y+'px';}};
-    const up=()=>{n.removeEventListener('pointermove',mv);n.removeEventListener('pointerup',up);
-      n.classList.remove('dragging'); if(moved)queueSave();};
+    const mv=e2=>{if(!moved&&Math.hypot(e2.clientX-sx,e2.clientY-sy)>4)moved=true;
+      if(moved){d.x=ox+(e2.clientX-sx)/S.zoom;d.y=oy+(e2.clientY-sy)/S.zoom;
+        n.style.left=d.x+'px';n.style.top=d.y+'px';}};
+    const up=e2=>{n.removeEventListener('pointermove',mv);n.removeEventListener('pointerup',up);
+      n.classList.remove('dragging');
+      if(moved)queueSave(); else if(body.onclick)body.onclick(e2);};
     n.addEventListener('pointermove',mv); n.addEventListener('pointerup',up);
   });
   return n;
@@ -898,6 +940,8 @@ function frameWrap(html,frame,frameColor){ // shared frame styling (RMJ widget +
 }
 
 async function paintEl(d,n,body){
+  if(d.type==='note'){body.style.background=d.color||'#ffe66b';body.style.fontSize=(d.fs||14)+'px';
+    body.innerHTML=rmjParse(d.text||''); return;}
   body.className='body';
   if(d.type==='text'){
     n.style.borderRadius='10px';
@@ -967,6 +1011,7 @@ async function addToPage(d){d.id=d.id||uuid();d.z=d.z||(curPage().els.length+1);
 /* ---------- adders / editors ---------- */
 async function addElement(kind){
   const cx=curPage().w/2, cy=200+Math.random()*120;
+  if(kind==='note')return notePicker();
   if(kind==='text')return textEditor(null);
   if(kind==='log')return logComposer(null);
   if(kind==='image'){
@@ -991,7 +1036,47 @@ async function addElement(kind){
   if(kind==='link')return linkEditor(null);
   if(kind==='embed')return embedEditor(null);
 }
+const NOTE_COLORS=['#ffe66b','#ffd1dc','#b9e6ff','#c9f2c1','#ffd9a6','#e3d2ff'];
+function noteComposer(existing){
+  const d=existing||{type:'note',text:'',color:'#ffe66b',fs:14,w:230,h:210,x:curPage().w/2-115,y:200+Math.random()*100};
+  const ta=el('textarea',{style:'min-height:110px;resize:vertical;',value:d.text||''});
+  const sw=el('div',{cls:'row'}); let cur=d.color||'#ffe66b';
+  NOTE_COLORS.forEach(c=>{const s=el('div',{cls:'sw'+(c===cur?' on':''),style:'background:'+c+';border-radius:7px'});
+    s.onclick=()=>{cur=c;[...sw.children].forEach(x=>x.classList.remove('on'));s.classList.add('on');};sw.append(s);});
+  const fs=el('input',{type:'number',value:d.fs||14,min:8,max:48,style:'width:74px'});
+  const tpl=el('input',{type:'checkbox',checked:!existing});
+  const m=openModal(existing?'Edit sticky note':'New sticky note',
+    el('div',{},
+      el('div',{cls:'f'},'Note text — RMJ markdown works (**bold**, [NeonPink]color[Default]…)'),ta,
+      el('div',{cls:'row',style:'margin-top:8px'},el('label',{cls:'f'},'Color',sw),el('label',{cls:'f'},'Text size',fs)),
+      existing?document.createTextNode(''):el('label',{cls:'row',style:'gap:8px;margin-top:8px;align-items:center'},tpl,
+        el('span',{text:'Save as reusable template (paste it onto any page later)'}))),
+    [[existing?'Save':'Place on page',async()=>{d.text=ta.value;d.color=cur;d.fs=+fs.value||14;m.close();
+      if(existing){await repaint(d);}
+      else{await addToPage(d);
+        if(tpl.checked){S.noteTpls.push({id:uuid(),text:d.text,color:d.color,fs:d.fs,w:d.w,h:d.h});
+          await DB.put('meta',{id:'noteTpls',list:S.noteTpls}); toast('Sticky note saved to your templates 🗒️');}}
+    },'brass']]);
+}
+function notePicker(){
+  const grid=el('div',{style:'display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;max-height:320px;overflow:auto;margin-top:6px'});
+  const m=openModal('Sticky notes',el('div',{},
+    el('button',{cls:'btn brass',text:'＋ New sticky note',onclick:()=>{m.close();noteComposer(null);}}),
+    el('div',{cls:'f',style:'margin-top:12px'},'Your templates — tap one to paste a copy onto this page'),grid),[]);
+  if(!S.noteTpls.length)grid.append(el('span',{style:'color:#98a0b5;font-size:13px',text:'No templates yet — create a note and leave “Save as reusable template” ticked.'}));
+  for(const t of S.noteTpls){
+    const card=el('div',{style:`background:${t.color};border-radius:5px;padding:10px;min-height:84px;color:#3a3320;font-size:12px;box-shadow:0 4px 10px rgba(0,0,0,.3);position:relative;cursor:pointer;overflow:hidden`});
+    card.append(el('div',{html:rmjParse((t.text||'').slice(0,110))}));
+    const del=el('button',{text:'✕',title:'Delete template',
+      style:'position:absolute;top:3px;right:3px;background:rgba(0,0,0,.3);border:none;color:#fff;border-radius:50%;width:24px;height:24px;cursor:pointer;font-size:12px'});
+    del.onclick=async e=>{e.stopPropagation();S.noteTpls=S.noteTpls.filter(x=>x.id!==t.id);
+      await DB.put('meta',{id:'noteTpls',list:S.noteTpls});card.remove();};
+    card.onclick=async()=>{m.close();const w=t.w||230;
+      await addToPage({type:'note',text:t.text,color:t.color,fs:t.fs,w,h:t.h||210,x:curPage().w/2-w/2,y:200+Math.random()*120});};
+    card.append(del);grid.append(card);}
+}
 function editElement(d){
+  if(d.type==='note')return noteComposer(d);
   if(d.type==='text')return textEditor(d);
   if(d.type==='log')return logComposer(d);
   if(d.type==='sep')return sepEditor(d);
@@ -1216,6 +1301,7 @@ function staticStrokeSVG(p){
   return s+'</svg>';
 }
 async function staticEl(d,aurl){
+  if(d.type==='note')return `<div class="pel el-note" id="el-${d.id}" style="left:${d.x}px;top:${d.y}px;width:${d.w}px;${d.h?`height:${d.h}px;`:''}z-index:${d.z||1};"><div class="body" style="background:${d.color||'#ffe66b'};font-size:${d.fs||14}px;">${rmjParse(d.text||'')}</div></div>`;
   const pos=`left:${d.x}px;top:${d.y}px;width:${d.w}px;${d.h?`height:${d.h}px;`:''}z-index:${d.z||1};`;
   const wrap=(inner,extra='')=>`<div class="pel el-${d.type}" id="el-${d.id}" style="${pos}${extra}"><div class="body">${inner}</div></div>`;
   if(d.type==='text'){
@@ -1259,6 +1345,8 @@ const XCSS=`body{margin:0;background:#14161d;font-family:system-ui,sans-serif;co
 .xhead p{color:#8a91a8;font-size:12px;margin:6px 0 0;}
 .xscaler{width:max-content;margin:0 auto;transform-origin:top left;}
 .xpage{position:relative;margin:26px auto;box-shadow:0 12px 40px rgba(0,0,0,.55);border-radius:3px;overflow:hidden;background:#fbf8f1;}
+.xptext{position:absolute;top:32px;left:36px;right:30px;bottom:24px;line-height:32px;font-size:19px;color:#1d232e;white-space:pre-wrap;word-wrap:break-word;overflow-wrap:break-word;overflow:hidden;}
+.el-note .body{padding:12px 14px 18px;overflow:auto;border-radius:2px;color:#3a3320;line-height:1.45;word-wrap:break-word;white-space:pre-wrap;box-shadow:0 8px 18px rgba(70,55,10,.28);background-image:linear-gradient(160deg,rgba(255,255,255,.5),rgba(255,255,255,0) 45%),linear-gradient(315deg,rgba(0,0,0,.16) 11px,rgba(0,0,0,.05) 12px,transparent 12.5px);}
 .xbg,.xpaper{position:absolute;inset:0;} .xink{position:absolute;inset:0;width:100%;height:100%;}
 .pel{position:absolute;} .pel .body{width:100%;height:100%;overflow:hidden;}
 .xplink{display:flex;align-items:center;gap:8px;background:#fff;border:1.5px solid #c9cfdd;border-radius:10px;padding:8px 12px;color:#1d3f8f;font-size:14px;text-decoration:none;height:100%;box-sizing:border-box;box-shadow:0 2px 6px rgba(20,30,60,.12);}
@@ -1296,7 +1384,7 @@ $('#btnExport').onclick=async()=>{
     let els=''; for(const d of [...p.els].sort((a,b)=>(a.z||1)-(b.z||1))) els+=await staticEl(d,aurl);
     pagesHtml+=`<div class="xpage" id="pg-${p.id}" style="width:${p.w}px;height:${p.h}px;background:${(p.paperColor??S.nb.paperColor)||'#fbf8f1'}">`+
       bgDiv+`<div class="xpaper" style="background-image:${paperBg||'none'};${paperKey==='dots'?'background-size:26px 26px;':''}"></div>`+
-      staticStrokeSVG(p)+els+`</div>`;
+      `<div class="xptext" style="font-family:${(p.font||S.nb.font)||'inherit'}">${p.body||''}</div>`+staticStrokeSVG(p)+els+`</div>`;
   }
   const doc=`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">`+
     `<title>${esc(S.nb.title)} — InkShelf export</title><style>${fontCss}${XCSS}</style></head><body>`+
